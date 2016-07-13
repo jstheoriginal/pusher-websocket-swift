@@ -7,11 +7,8 @@
 
 import Foundation
 
-public typealias PusherEventJSON = Dictionary<String, AnyObject>
-public typealias PusherUserData = PresenceChannelMember
-
 let PROTOCOL = 7
-let VERSION = "1.0.0"
+let VERSION = "2.0.0"
 let CLIENT_NAME = "pusher-websocket-swift"
 
 public class Pusher {
@@ -43,8 +40,11 @@ public class Pusher {
 
         - returns: A new PusherChannel instance
      */
-    public func subscribe(channelName: String, onMemberAdded: ((PresenceChannelMember) -> ())? = nil, onMemberRemoved: ((PresenceChannelMember) -> ())? = nil) -> PusherChannel {
-        return self.connection.subscribe(channelName, onMemberAdded: onMemberAdded, onMemberRemoved: onMemberRemoved)
+    public func subscribe(
+        channelName: String,
+        onMemberAdded: ((PresenceChannelMember) -> ())? = nil,
+        onMemberRemoved: ((PresenceChannelMember) -> ())? = nil) -> PusherChannel {
+            return self.connection.subscribe(channelName, onMemberAdded: onMemberAdded, onMemberRemoved: onMemberRemoved)
     }
 
     /**
@@ -96,17 +96,6 @@ public class Pusher {
     public func connect() {
         self.connection.connect()
     }
-}
-
-public protocol AuthRequestBuilderProtocol {
-    func requestFor(socketID: String, channel: PusherChannel) -> NSMutableURLRequest
-}
-
-public enum AuthMethod {
-    case Endpoint(authEndpoint: String)
-    case AuthRequestBuilder(authRequestBuilder: AuthRequestBuilderProtocol)
-    case Internal(secret: String)
-    case NoMethod
 }
 
 /**

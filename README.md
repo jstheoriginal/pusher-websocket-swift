@@ -10,35 +10,15 @@
 
 ## I just want to copy and paste some code to get me started
 
-```swift
-// Only use your secret here for testing or if you're sure that there's no security risk
-let pusher = Pusher(key: "YOUR_APP_KEY", options: ["secret": "YOUR_APP_SECRET"])
-
-// It doesn't matter (within reason) where this goes but you have to call it at some point
-pusher.connect()
-
-let onMemberAdded = { (member: PresenceChannelMember) in
-    print(member)
-}
-let chan = pusher.subscribe("presence-channel", onMemberAdded: onMemberAdded)
-
-chan.bind("test-event", callback: { (data: AnyObject?) -> Void in
-    print(data)
-    if let data = data as? Dictionary<String, AnyObject> {
-        if let testVal = data["test"] as? String {
-            print(testVal)
-        }
-    }
-})
-
-chan.trigger("client-test", data: ["test": "some value"])
-```
+What else would you want? Head over to the example app [ViewController.swift](https://github.com/pusher/pusher-websocket-swift/blob/master/Example/ViewController.swift) to get some code you can drop in to get started.
 
 ## Table of Contents
 
 * [Installation](#installation)
 * [Configuration](#configuration)
 * [Connection](#connection)
+  * [Connection state changes](#connection-state-changes)
+  * [Reconnection](#reconnection)
 * [Subscribing to channels](#subscribing)
 * [Binding to events](#binding-to-events)
   * [Globally](#global-events)
@@ -101,50 +81,78 @@ github "pusher/pusher-websocket-swift"
 
 There are a number of configuration parameters which can be set for the Pusher client. They are:
 
-- `authEndpoint (String)` - the URL that the library will make an authentication request to if attempting to subscribe to a private or presence channel and you have not provided a secret
-- `secret (String)` - your app's secret so that authentication requests do not need to be made to your authentication endpoint and instead subscriptions can be authenticated directly inside the library (this is mainly desgined to be used for development)
-- `userDataFetcher (() -> PusherUserData)` - if you are subscribing to an authenticated channel and wish to provide a function to return user data
+- `authMethod (AuthMethod)` - the method you would like the client to use to authenticate subscription requests to channels requiring authentication (see below for more details)
 - `attemptToReturnJSONObject (Bool)` - whether or not you'd like the library to try and parse your data as JSON (or not, and just return a string)
 - `encrypted (Bool)` - whether or not you'd like to use encypted transport or not, default is `true`
-- `authRequestCustomizer (NSMutableURLRequest -> NSMutableURLRequest)` - if you are subscribing to an authenticated channel and wish to provide a function to customize the authorization request (see below for example)
 - `autoReconnect (Bool)` - set whether or not you'd like the library to try and autoReconnect upon disconnection
-- `host (String)` - set a custom value for the host you'd like to connect to
+- `host (PusherHost)` - set a custom value for the host you'd like to connect to, e.g. `PusherHost.Host("ws-test.pusher.com")`
 - `port (Int)` - set a custom value for the port that you'd lilke to connect to
-- `cluster (String)` - specify the cluster that you'd like to connect to, e.g. `eu`
-- `debugLogger ((String) -> ())` - provide a logger function that will be passed a string when a message is either sent of received over the websocket connection
 
-All of these configuration options can be set when instantiating the Pusher object, for example:
+The `authMethod` parameter must be of the type `AuthMethod`. This is an enum defined as:
 
 ```swift
-let pusher = Pusher(
-  key: "APP_KEY",
-  options: [
-    "authEndpoint": "http://localhost:9292/pusher/",
-    "encrypted": true
-  ]
+public enum AuthMethod {
+    case Endpoint(authEndpoint: String)
+    case AuthRequestBuilder(authRequestBuilder: AuthRequestBuilderProtocol)
+    case Internal(secret: String)
+    case NoMethod
+}
+```
+
+- `Endpoint(authEndpoint: String)` - the client will make a `POST` request to the endpoint you specify with the socket ID of the client and the channel name attempting to be subscribed to
+- `AuthRequestBuilder(authRequestBuilder: AuthRequestBuilderProtocol)` - you specify an object that conforms to the `AuthRequestBuilderProtocol` (defined below), which must generate an `NSURLRequest` object that will be used to make the auth request
+- `Internal(secret: String)` - your app's secret so that authentication requests do not need to be made to your authentication endpoint and instead subscriptions can be authenticated directly inside the library (this is mainly desgined to be used for development)
+- `NoMethod` - if you are only using public channels then you do not need to set an `authMethod` (this is the default value)
+
+This is the `AuthRequestBuilderProtocol` definition:
+
+```swift
+public protocol AuthRequestBuilderProtocol {
+    func requestFor(socketID: String, channel: PusherChannel) -> NSMutableURLRequest
+}
+```
+
+Note that if you want to specify the cluster to which you want to connect then you use the `host` property as follows:
+
+```swift
+let options = PusherClientOptions(
+    host: .Cluster("eu")
 )
+```
+
+All of these configuration options need to be passed to a `PusherClientOptions` object, which in turn needs to be passed to the Pusher object, when instantiating it, for example:
+
+```swift
+let options = PusherClientOptions(
+    authMethod: .Endpoint(authEndpoint: "http://localhost:9292/pusher/auth")
+)
+
+let pusher = Pusher(key: "APP_KEY", options: options)
 ```
 
 Authenticated channel example:
 
 ```swift
-
-let request = {(urlRequest:NSMutableURLRequest) -> NSMutableURLRequest in
-    urlRequest.setValue("token", forHTTPHeaderField: "Authorization")
-    return urlRequest
+struct AuthRequestBuilder: AuthRequestBuilderProtocol {
+    func requestFor(socketID: String, channel: PusherChannel) -> NSMutableURLRequest {
+        let request = NSMutableURLRequest(URL: NSURL(string: "http://localhost:9292/builder")!)
+        request.HTTPMethod = "POST"
+        request.HTTPBody = "socket_id=\(socketID)&channel_name=\(channel.name)".dataUsingEncoding(NSUTF8StringEncoding)
+        request.addValue("myToken", forHTTPHeaderField: "Authorization")
+        return request
+    }
 }
 
+let options = PusherClientOptions(
+    authMethod: AuthMethod.AuthRequestBuilder(authRequestBuilder: AuthRequestBuilder())
+)
 let pusher = Pusher(
   key: "APP_KEY",
-  options: [
-    "authEndpoint": "http://localhost:9292/pusher/",
-    "authRequestCustomizer": request,
-    "encrypted": true
-  ]
+  options: options
 )
 ```
 
-Where `"Authorization"` and `"token"` are the field and value your server is expecting in the headers of the request.
+Where `"Authorization"` and `"myToken"` are the field and value your server is expecting in the headers of the request.
 
 ## Connection
 
@@ -156,6 +164,24 @@ pusher.connect()
 ```
 
 This returns a client object which can then be used to subscribe to channels and then calling `connect()` triggers the connection process to start.
+
+You can also set some useful properties on the connection object. These are the following:
+
+- `debugLogger ((String) -> ())` - provide a logger function that will be passed a string when a message is either sent of received over the websocket connection
+- `userDataFetcher (() -> PusherUserData)` - if you are subscribing to an authenticated channel and wish to provide a function to return user data
+
+As you'd expect, you set these like this:
+
+```swift
+let pusher = Pusher(key: "APP_KEY")
+pusher.connection.debugLogger = { (str: String) in
+    print(str)
+}
+pusher.connection.userDataFetcher = { () -> PusherUserData in
+    return PusherUserData(userId: "123", userInfo: ["twitter": "hamchapman"])
+}
+```
+
 
 ### Connection state changes
 
@@ -179,6 +205,39 @@ class ViewController: UIViewController, ConnectionStateChangeDelegate {
     }
 }
 ```
+
+The different states that the connection can be in are:
+
+* `Connecting` - the connection is about to attempt to be made
+* `Connected` - the connection has been successfully made
+* `Disconnecting` - the connection has been instructed to disconnect and it is just about to do so
+* `Disconnected` - the connection has disconnected and no attempt will be made to reconnect automatically
+* `Reconnecting` - an attempt is going to be made to try and re-establish the connection
+* `ReconnectingWhenNetworkBecomesReachable` - when the network becomes reachable an attempt will be made to reconnect
+
+
+### Reconnection
+
+There are three main ways in which a disconnection can occur:
+
+  * The client explicitly calls disconnect and a close frame is sent over the websocket connection
+  * The client experiences some form of network degradation which leads to a heartbeat (ping/pong) message being missed and thus the client disconnects
+  * The Pusher server closes the websocket connection; typically this will only occur during a restart of the Pusher socket servers and an almost immediate reconnection should occur
+
+In the case of the first type of disconnection the library will (as you'd hope) not attempt a reconnection.
+
+If there is network degradation that leads to a disconnection then the library has the [Reachability](https://github.com/ashleymills/Reachability.swift) library embedded and will be able to automatically determine when to attempt a reconnect based on the changing network conditions.
+
+If the Pusher servers close the websocket then the library will attempt to reconnect (by default) a maximum of 6 times, with an exponential backoff. The value of `reconnectAttemptsMax` is a public property on the `PusherConnection` and so can be changed if you wish.
+
+All of this is the case if you have the client option of `autoReconnect` set as `true`, which it is by default. If the reconnection strategies are not suitable for your use case then you can set `autoReconnect` to `false` and implement your own reconnection strategy based on the connection state changes.
+
+There are a couple of properties on the connection (`PusherConnection`) that you can set that affect how the reconnection behaviour works. These are:
+
+* `public var reconnectAttemptsMax: Int? = 6` - if you set this to `nil` then there is no maximum number of reconnect attempts and so attempts will continue to be made with an exponential backoff (based on number of attempts), otherwise only as many attempts as this property's value will be made before the connection's state moves to `.Disconnected`
+* `public var maxReconnectGapInSeconds: Double? = nil` - if you want to set a maximum length of time (in seconds) between reconnect attempts then set this property appropriately
+
+Note that the number of reconnect attempts gets reset to 0 as soon as a successful connection is made.
 
 ## Subscribing
 
@@ -234,7 +293,7 @@ let pusher = Pusher(key: "MY_KEY")
 pusher.subscribe("my-channel")
 
 pusher.bind("new-comment", callback: { (data: AnyObject?) -> Void in
-    if let data = data as? Dictionary<String, AnyObject> {
+    if let data = data as? [String : AnyObject] {
         if let commenter = data["commenter"] as? String, message = data["message"] as? String {
             print("\(commenter) wrote \(message)")
         }
@@ -251,7 +310,7 @@ let pusher = Pusher(key: "MY_KEY")
 let myChannel = pusher.subscribe("my-channel")
 
 myChannel.bind("new-price", callback: { (data: AnyObject?) -> Void in
-    if let data = data as? Dictionary<String, AnyObject> {
+    if let data = data as? [String : AnyObject] {
         if let price = data["price"] as? String, company = data["company"] as? String {
             print("\(company) is now priced at \(price)")
         }
@@ -347,14 +406,16 @@ print(me)
 
 ## Testing
 
-There are a set of tests for the library that can be run using the standard methods (Command-U in Xcode) when you have one the `PusherSwiftTests-*` schemes active in Xcode. The tests also get run on [Travis-CI](https://travis-ci.org/pusher/pusher-websocket-swift).
+There are a set of tests for the library that can be run using the standard methods (Command-U in Xcode) when you have one the `PusherSwiftTests-*` schemes active in Xcode.
+
+The tests also get run on [Travis-CI](https://travis-ci.org/pusher/pusher-websocket-swift). See [.travis.yml](https://github.com/pusher/pusher-websocket-swift/blob/master/.travis.yml) for details on how the Travis tests are run.
 
 
 ## Communication
 
-- If you have found a bug, open an issue.
-- If you have a feature request, open an issue.
-- If you want to contribute, submit a pull request (preferrably with some tests :) ).
+- If you have found a bug, please open an issue.
+- If you have a feature request, please open an issue.
+- If you want to contribute, please submit a pull request (preferrably with some tests :) ).
 
 
 ## Maintainers

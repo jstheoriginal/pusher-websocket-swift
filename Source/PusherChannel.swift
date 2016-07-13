@@ -110,14 +110,10 @@ public class PusherChannel {
     */
     public func handleEvent(eventName: String, eventData: String) {
         if let eventHandlerArray = self.eventHandlers[eventName] {
-            if connection.options.attemptToReturnJSONObject {
-                for eventHandler in eventHandlerArray {
-                    eventHandler.callback(connection.getEventDataJSONFromString(eventData))
-                }
-            } else {
-                for eventHandler in eventHandlerArray {
-                    eventHandler.callback(eventData)
-                }
+            let jsonize = connection.options.attemptToReturnJSONObject
+
+            for eventHandler in eventHandlerArray {
+                eventHandler.callback(jsonize ? connection.getEventDataJSONFromString(eventData) : eventData)
             }
         }
     }
