@@ -585,7 +585,7 @@ public class PusherConnection {
                 }
             }
         })
-        
+
         task.resume()
     }
 
